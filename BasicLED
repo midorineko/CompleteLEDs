@@ -98,8 +98,8 @@ unsigned long FadeBlendMillStart;
 
 
 //AWS IOT config, change these:
-char wifi_ssid[]       = "Cats in Space";
-char wifi_password[]   = "meowmixer";
+char wifi_ssid[]       = "WIFI SSID";
+char wifi_password[]   = "WIFI Password";
 char aws_endpoint[]    = "AWS ENDPOINT";
 char aws_key[]         = "AWS KEY";
 char aws_secret[]      = "AWS SECRET";
