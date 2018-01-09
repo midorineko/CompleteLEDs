@@ -27,8 +27,6 @@
 #define FASTLED_INTERRUPT_RETRY_COUNT 0
 //#define FASTLED_ALLOW_INTERRUPTS 0
 #include <FastLED.h>
-#define DATA_PIN 15
-#define NUM_LEDS 24
 #define CALIBRATION_TEMPERATURE TypicalLEDStrip
 CRGB leds[NUM_LEDS];
 CRGB leds_new[NUM_LEDS];
@@ -98,6 +96,8 @@ unsigned long FadeBlendMillStart;
 
 
 //AWS IOT config, change these:
+#define DATA_PIN 15
+#define NUM_LEDS 24
 char wifi_ssid[]       = "Cats in Space";
 char wifi_password[]   = "meowmixer";
 char aws_endpoint[]    = "AWS ENDPOINT";
