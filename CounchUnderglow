@@ -101,7 +101,7 @@ void loop() {
   }else{
     if(lastThreeCount == 10){
       if(max_brightness != 0 ){
-//       max_brightness = max_brightness - 10;
+       max_brightness = max_brightness - 10;
        FastLED.setBrightness(max_brightness);
        FastLED.show();
       }
