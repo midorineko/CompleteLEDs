@@ -1,0 +1,113 @@
+#define FASTLED_ESP8266_RAW_PIN_ORDER
+
+
+#include "FastLED.h"
+
+#define DATA_PIN    15
+#define LED_TYPE    WS2812B
+#define COLOR_ORDER RGB
+#define NUM_LEDS    30
+CRGB leds[NUM_LEDS];
+int r = 0;
+int g = 0;
+int b = 0;
+int r2 = 0;
+int g2 = 0;
+int b2 = 0;
+int r3 = 0;
+int g3 = 0;
+int b3 = 0;
+
+int knockSensor = 0;               
+byte val = 0;
+int THRESHOLD = 70;
+int max_brightness = 200;
+int cur_brightness = 200;
+bool FadeBrightFlip = true;
+bool lastThree = false;
+int lastThreeCount = 0;
+int noMusic = 0;
+
+void setup() {
+ Serial.begin(115200);
+ FastLED.addLeds<LED_TYPE,DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
+ r = random8(255);
+ g = random8(255);
+ b = random8(255);
+ r2 = random8(255);
+ g2 = random8(255);
+ b2 = random8(255);
+ r3 = random8(255);
+ g3 = random8(255);
+ b3 = random8(255);
+ for(int k = 0; k < 24; k++){
+     leds[k].setRGB(r, g, b);
+ }
+ for(int k = 24; k < 37; k++){
+     leds[k].setRGB(r2, g2, b2);
+ }
+ for(int k = 37; k < 50; k++){
+     leds[k].setRGB(r3, g3, b3);
+ }
+     FastLED.setBrightness(max_brightness);
+    FastLED.show();
+}
+
+
+
+void loop() {
+  FastLED.show();
+  val = analogRead(knockSensor); 
+  Serial.println(val);
+  if (val >= THRESHOLD) {
+    Serial.println("Sitting!");
+    if(max_brightness <= 0){
+      max_brightness = 0;
+      FadeBrightFlip = false;
+      r = random8(255);
+      g = random8(255);
+      b = random8(255);
+      r2 = random8(255);
+      g2 = random8(255);
+      b2 = random8(255);
+      r3 = random8(255);
+      g3 = random8(255);
+      b3 = random8(255);
+      for(int k = 0; k < 24; k++){
+          leds[k].setRGB(r, g, b);
+      }
+      for(int k = 24; k < 39; k++){
+          leds[k].setRGB(r2, g2, b2);
+      }
+      for(int k = 39; k < 50; k++){
+          leds[k].setRGB(r3, g3, b3);
+      }
+    }
+    if(max_brightness >= cur_brightness){
+      max_brightness = 200;
+      FadeBrightFlip = true;
+    }
+    if(FadeBrightFlip == true){
+      max_brightness = max_brightness - 10;
+    }else{
+     max_brightness = max_brightness + 10;
+    }
+    FastLED.setBrightness(max_brightness);
+    FastLED.show();
+    if(max_brightness == cur_brightness - 10){
+      delay(10000);
+    }
+    lastThreeCount = 0;
+  }else{
+    if(lastThreeCount == 10){
+      if(max_brightness != 0 ){
+//       max_brightness = max_brightness - 10;
+       FastLED.setBrightness(max_brightness);
+       FastLED.show();
+      }
+    }else{
+      lastThreeCount += 1;
+    }
+  }
+  delay(100);  // we have to make a delay to avoid overloading the serial port
+}
