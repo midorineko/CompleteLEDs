@@ -26,13 +26,13 @@
 #warning "Requires FastLED 3.1 or later; check github for latest code."
 #endif
 int wifi_uptime = 300000; //this is how long the wifi will stay up. Whatever is LED settings are set at the end of this time will be locked in
-#define DATA_PIN    D8
-#define DATA_PIN2   D7
+#define DATA_PIN    0
+#define DATA_PIN2   2
 
 //#define CLK_PIN   4
 #define LED_TYPE    WS2812B
 #define COLOR_ORDER GRB
-#define NUM_LEDS    6
+#define NUM_LEDS    16
 CRGB leds[NUM_LEDS];
 int BRIGHTNESS    =      190;
 int FRAMES_PER_SECOND = 60;
@@ -454,6 +454,10 @@ void loop() {
       if(rainbowTrueOn){
         rainbowTrue();
       }
+      for(int i=0 ; i<NUM_LEDS/2; i++)
+      {
+          leds[NUM_LEDS-i-1]=leds[i];
+      }
       FastLED.show(); 
       setDelay =  FRAMES_PER_SECOND;
       EVERY_N_MILLISECONDS( 20 ) { gHue++; } // slowly cycle the "base color" through the rainbow
@@ -624,13 +628,13 @@ void next_call()
 
 void rainbowTrue() 
 {
-  fill_rainbow( leds, NUM_LEDS, gHue, 36);
+  fill_rainbow( leds, NUM_LEDS/2, gHue, 36);
 }
 
 void rainbow() 
 {
   // FastLED's built-in rainbow generator
-  fill_rainbow( leds, NUM_LEDS, gHue, 7);
+  fill_rainbow( leds, NUM_LEDS/2, gHue, 7);
 }
 
 void rainbowWithGlitter() 
@@ -642,21 +646,21 @@ void rainbowWithGlitter()
 void addGlitter( fract8 chanceOfGlitter) 
 {
   if( random8() < chanceOfGlitter) {
-    leds[ random16(NUM_LEDS) ] += CRGB::White;
+    leds[ random16(NUM_LEDS/2) ] += CRGB::White;
   }
 }
 
 void confetti() 
 {
   fadeToBlackBy( leds, NUM_LEDS, 100);
-  int pos = random16(NUM_LEDS);
+  int pos = random16(NUM_LEDS/2);
   leds[pos] += CHSV( gHue + random8(64), 255, 192);
 }
 
 void sinelon()
 {
   fadeToBlackBy( leds, NUM_LEDS, 100);
-  int pos = beatsin16( 50, 0, NUM_LEDS-1 );
+  int pos = beatsin16( 50, 0, NUM_LEDS/2-1 );
   leds[pos] += CHSV( gHue, 255, 192);
 }
 
@@ -664,14 +668,14 @@ void bpm()
 {
   CRGBPalette16 palette = PartyColors_p;
   uint8_t beat = beatsin8( BeatsPerMinute, 64, 255);
-  for( int i = 0; i < NUM_LEDS; i++) { //9948
+  for( int i = 0; i < NUM_LEDS/2; i++) { //9948
     leds[i] = ColorFromPalette(palette, gHue+(i*2), beat-gHue+(i*10));
   }
 }
 
 void slowFade() {
   fadeHue++;
-  for( int i = 0; i < NUM_LEDS; i++) {
+  for( int i = 0; i < NUM_LEDS/2; i++) {
     leds[i].setHue(fadeHue);
   }
   Serial.println(fadeHue);
@@ -681,7 +685,7 @@ void slowFade() {
 }
 
 void twinkleSet() {
-  int pos = random16(NUM_LEDS);
+  int pos = random16(NUM_LEDS/2);
   leds[pos] += CHSV( gHue + random8(64), 200, 255);
   FastLED.show(); 
 }
