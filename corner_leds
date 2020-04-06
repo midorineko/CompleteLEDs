@@ -1,0 +1,702 @@
+#define FASTLED_ESP8266_RAW_PIN_ORDER
+#define FASTLED_INTERNAL
+#define FASTLED_INTERRUPT_RETRY_COUNT 0
+#define FASTLED_ALLOW_INTERRUPTS 0
+
+#include "FastLED.h"
+
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+#include <DNSServer.h>
+#include <ESP8266mDNS.h>
+#include <EEPROM.h>
+
+/*
+   This example serves a "hello world" on a WLAN and a SoftAP at the same time.
+   The SoftAP allow you to configure WLAN parameters at run time. They are not setup in the sketch but saved on EEPROM.
+   Connect your computer or cell phone to wifi network ESP_ap with password 12345678. A popup may appear and it allow you to go to WLAN config. If it does not then navigate to http://192.168.4.1/wifi and config it there.
+   Then wait for the module to connect to your wifi and take note of the WLAN IP it got. Then you can disconnect from ESP_ap and return to your regular WLAN.
+   Now the ESP8266 is in your network. You can reach it through http://192.168.x.x/ (the IP you took note of) or maybe at http://esp8266.local too.
+   This is a captive portal because through the softAP it will redirect any http request to http://192.168.4.1/
+*/
+#define FASTLED_ESP8266_RAW_PIN_ORDER
+
+#if defined(FASTLED_VERSION) && (FASTLED_VERSION < 3001000)
+#warning "Requires FastLED 3.1 or later; check github for latest code."
+#endif
+int wifi_uptime = 300000; //this is how long the wifi will stay up. Whatever is LED settings are set at the end of this time will be locked in
+#define DATA_PIN    D4
+#define DATA_PIN2   2
+
+//#define CLK_PIN   4
+#define LED_TYPE    WS2812B
+#define COLOR_ORDER GRB
+#define NUM_LEDS    114
+CRGB leds[NUM_LEDS];
+int BRIGHTNESS    =      190;
+int FRAMES_PER_SECOND = 60;
+uint8_t BeatsPerMinute = 62;
+int r = 0;
+int g = 155;
+int b = 155;
+int fadeHue = 0;
+String homemade_method = "else";
+bool wifi_on = true;
+
+
+bool rainbowOn = false;
+bool rainbowWithGlitterOn = false;
+bool confettiOn = false;
+bool sinelonOn = false;
+bool juggleOn = false;
+bool bpmOn = false;
+bool concentricRingsOn = false;
+bool unsunkRingsOn = false;
+bool sunkRingsOn = false;
+bool poolingRingsOn = false;
+bool slowFadeOn = false;
+bool twinkleSetOn = false;
+bool solidOn = false;
+bool rainbowTrueOn = false;
+int delayTime = 15;
+
+unsigned long StartTime = millis();
+/* Set these to your desired softAP credentials. They are not configurable at runtime */
+#ifndef APSSID
+#define APSSID "Corner LEDs"
+#define APPSK  "12345678"
+#endif
+
+const char *softAP_ssid = APSSID;
+const char *softAP_password = APPSK;
+
+/* hostname for mDNS. Should work at least on windows. Try http://esp8266.local */
+const char *myHostname = "mrcatnaps";
+
+/* Don't set this wifi credentials. They are configurated at runtime and stored on EEPROM */
+char ssid[32] = "";
+char password[32] = "";
+char thingName[32] = "";
+char rgbOrder[32] = "";
+char ledCount[32] = "";
+// DNS server
+const byte DNS_PORT = 53;
+DNSServer dnsServer;
+
+// Web server
+ESP8266WebServer server(80);
+
+/* Soft AP network parameters */
+//IPAddress apIP(192, 168, 4, 1);
+IPAddress apIP(8, 8, 8, 8);
+IPAddress netMsk(255, 255, 255, 0);
+
+
+/** Should I connect to WLAN asap? */
+boolean connect;
+
+/** Last time I tried to connect to WLAN */
+unsigned long lastConnectTry = 0;
+
+/** Current WLAN status */
+unsigned int status = WL_IDLE_STATUS;
+
+/** Is this an IP? */
+boolean isIp(String str) {
+  for (size_t i = 0; i < str.length(); i++) {
+    int c = str.charAt(i);
+    if (c != '.' && (c < '0' || c > '9')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** IP to String? */
+String toStringIp(IPAddress ip) {
+  String res = "";
+  for (int i = 0; i < 3; i++) {
+    res += String((ip >> (8 * i)) & 0xFF) + ".";
+  }
+  res += String(((ip >> 8 * 3)) & 0xFF);
+  return res;
+}
+
+/** Load WLAN credentials from EEPROM */
+void loadCredentials() {
+  EEPROM.begin(512);
+  EEPROM.get(0, ssid);
+  EEPROM.get(0 + sizeof(ssid), password);
+  char ok[2 + 1];
+  EEPROM.get(0 + sizeof(ssid) + sizeof(password), thingName);
+  EEPROM.get(0 + sizeof(ssid) + sizeof(password)+ sizeof(thingName), ledCount);
+  EEPROM.get(0 + sizeof(ssid) + sizeof(password)+ sizeof(thingName)+ sizeof(ledCount), rgbOrder);
+  EEPROM.get(0 + sizeof(ssid) + sizeof(password)+ sizeof(thingName)+ sizeof(ledCount)+ sizeof(rgbOrder), ok);
+  EEPROM.end();
+  if (String(ok) != String("OK")) {
+    ssid[0] = 0;
+    password[0] = 0;
+  }
+  Serial.println("Recovered credentials:");
+  Serial.println(ssid);
+  Serial.println(strlen(password) > 0 ? "********" : "<no password>");
+}
+
+/** Store WLAN credentials to EEPROM */
+void saveCredentials() {
+  EEPROM.begin(512);
+  EEPROM.put(0, ssid);
+  EEPROM.put(0 + sizeof(ssid), password);
+  char ok[2 + 1] = "OK";
+  EEPROM.get(0 + sizeof(ssid) + sizeof(password), thingName);
+  EEPROM.get(0 + sizeof(ssid) + sizeof(password)+ sizeof(thingName), ledCount);
+  EEPROM.get(0 + sizeof(ssid) + sizeof(password)+ sizeof(thingName)+ sizeof(ledCount), rgbOrder);
+  EEPROM.get(0 + sizeof(ssid) + sizeof(password)+ sizeof(thingName)+ sizeof(ledCount)+ sizeof(rgbOrder), ok);
+  EEPROM.commit();
+  EEPROM.end();
+}
+
+/** Handle root or redirect to captive portal */
+void handleRoot() {
+  if (captivePortal()) { // If caprive portal redirect instead of displaying the page.
+    return;
+  }
+  server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Expires", "-1");
+
+  String Page;
+  Page += F(
+            "<html><head></head><body>"
+            "<h1>HELLO WORLD!!</h1>");
+  if (server.client().localIP() == apIP) {
+    Page += String(F("<p>You are connected through the soft AP: ")) + softAP_ssid + F("</p>");
+  } else {
+    Page += String(F("<p>You are connected through the wifi network: ")) + ssid + F("</p>");
+  }
+  Page += F(
+            "<p>You may want to <a href='/wifi'>config the wifi connection</a>.</p>"
+            "</body></html>");
+
+  server.send(200, "text/html", Page);
+}
+
+/** Redirect to captive portal if we got a request for another domain. Return true in that case so the page handler do not try to handle the request again. */
+boolean captivePortal() {
+  if (!isIp(server.hostHeader()) && server.hostHeader() != (String(myHostname) + ".local")) {
+    Serial.println("Request redirected to captive portal");
+    server.sendHeader("Location", String("http://") + toStringIp(server.client().localIP()), true);
+    server.send(302, "text/plain", "");   // Empty content inhibits Content-length header so we have to close the socket ourselves.
+    server.client().stop(); // Stop is needed because we sent no content length
+    return true;
+  }
+  return false;
+}
+
+String htmlTemplateTop = "<html><head><style>"
+  "</style></head><body><div id='page'><div id='title' style='text-align: center;'>Totem LEDs</div>";
+String buttonsOne = "</br></br><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/rainbow'>Rainbow</a><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/rainbowWithGlitter'>Glitter</a><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/confetti'>Confetti</a><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/sinelon'>Sinelon</a> </br><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/slowFade'>Fade</a> <a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/twinkleSet'>Twinkle</a></br>";
+String buttonsFive = "</br></br><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/juggle'>Juggle</a><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/Circus?beats=116'>BPM</a><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/speedUp'>Speed Up</a> <a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/slowDown'>Slow Down</a></br><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/brightUp'>Brighten</a> <a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/brightDown'>Dim</a></br>";
+String buttonsTwo = "</br></br><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/solid?r=0&b=255=&g=100'>Solid</a><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/rainbowTrue'>Rainbow True</a>";
+String buttonsThree = "</br><br></br><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/increase?c=1&a=50'>Up Red</a><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/decrease?c=1&a=50'>Down Red</a><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/increase?c=2&a=50'>Up Blue</a><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/decrease?c=2&a=50'>Down Blue</a><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/increase?c=3&a=50'>Up Green</a><a style='width: 39%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/decrease?c=3&a=50'>Down Green</a>";
+String buttonsFour = "</br></br><br><a style='width: 88%; height 30px; border: 1px solid orange; padding: 2% 2%; margin: 3% 3%; text-align: center; float: left; display: block;' href='/solid?r=0&g=0=&b=0'>Off</a>";
+String htmlTemplateBottom = "</div></body></html>";
+
+/** Wifi config page handler */
+void handleWifi() {
+  server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Expires", "-1");
+
+  String Page;
+  Page += F(
+            "<html><head></head><body>"
+            "<h1>LED SET UP</h1>");
+  Page += buttonsOne;
+  Page += buttonsFive;
+  Page += buttonsTwo;
+  Page += buttonsThree;
+  Page += buttonsFour;
+  server.send(200, "text/html", Page);
+  server.client().stop(); // Stop is needed because we sent no content length
+}
+
+/** Handle the WLAN save form and redirect to WLAN config page again */
+void handleWifiSave() {
+  Serial.println("wifi save");
+  server.arg("n").toCharArray(ssid, sizeof(ssid) - 1);
+  server.arg("p").toCharArray(password, sizeof(password) - 1);
+  server.arg("t").toCharArray(thingName, sizeof(thingName) - 1);
+  server.arg("l").toCharArray(ledCount, sizeof(ledCount) - 1);
+  server.arg("r").toCharArray(rgbOrder, sizeof(rgbOrder) - 1);
+  server.sendHeader("Location", "wifi", true);
+  server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Expires", "-1");
+  server.send(302, "text/plain", "");    // Empty content inhibits Content-length header so we have to close the socket ourselves.
+  server.client().stop(); // Stop is needed because we sent no content length
+  saveCredentials();
+  connect = strlen(ssid) > 0; // Request WLAN connect with new credentials if there is a SSID
+}
+
+void handleNotFound() {
+  if (captivePortal()) { // If caprive portal redirect instead of displaying the error page.
+    return;
+  }
+  String message = F("File Not Found\n\n");
+  message += F("URI: ");
+  message += server.uri();
+  message += F("\nMethod: ");
+  message += (server.method() == HTTP_GET) ? "GET" : "POST";
+  message += F("\nArguments: ");
+  message += server.args();
+  message += F("\n");
+
+  for (uint8_t i = 0; i < server.args(); i++) {
+    message += String(F(" ")) + server.argName(i) + F(": ") + server.arg(i) + F("\n");
+  }
+  server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Expires", "-1");
+  server.send(404, "text/plain", message);
+}
+
+void setup() {
+  delay(1000);
+  FastLED.addLeds<LED_TYPE,DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
+  FastLED.addLeds<LED_TYPE,DATA_PIN2,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
+  FastLED.setBrightness(BRIGHTNESS);
+  
+  Serial.begin(115200);
+  Serial.println();
+  Serial.println("Configuring access point...");
+  /* You can remove the password parameter if you want the AP to be open. */
+  WiFi.softAPConfig(apIP, apIP, netMsk);
+  WiFi.softAP(softAP_ssid, softAP_password);
+  delay(500); // Without delay I've seen the IP address blank
+  Serial.print("AP IP address: ");
+  Serial.println(WiFi.softAPIP());
+
+  /* Setup the DNS server redirecting all the domains to the apIP */
+  dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+  dnsServer.start(DNS_PORT, "*", apIP);
+
+  /* Setup web pages: root, wifi config pages, SO captive portal detectors and not found. */
+  server.on("/", handleWifi);
+  server.on("/wifi", handleWifi);
+  server.on("/wifisave", handleWifiSave);
+  server.on("/generate_204", handleWifi);  //Android captive portal. Maybe not needed. Might be handled by notFound handler.
+  server.on("/fwlink", handleWifi);  //Microsoft captive portal. Maybe not needed. Might be handled by notFound handler.
+  server.on("/concentricRings", concentricRings_call);
+  server.on("/unsunkRings", unsunkRings_call);
+  server.on("/sunkRings", sunkRings_call);
+  server.on("/poolingRings", poolingRings_call);
+  server.on("/rainbow", rainbow_call);
+  server.on("/rainbowTrue", rainbowTrue_call);
+  server.on("/rainbowWithGlitter", rainbowWithGlitter_call);
+  server.on("/confetti", confetti_call);
+  server.on("/sinelon", sinelon_call);
+  server.on("/juggle", juggle_call);
+  server.on("/slowFade", slowFade_call);
+  server.on("/twinkleSet", twinkleSet_call);
+  server.on("/next", next_call);
+  server.on("/Circus", [](){
+    int beats = server.arg("beats").toInt();
+    if (beats){
+        uint8_t BeatsPerMinute = beats;
+    }
+    bpm_call();
+  });
+  server.on("/slowDown", [](){
+    FRAMES_PER_SECOND += 30;
+    if(FRAMES_PER_SECOND >= 250){
+      FRAMES_PER_SECOND = 250;
+    }
+    handleWifi();
+  });
+  server.on("/speedUp", [](){
+    if(FRAMES_PER_SECOND > 100){
+       FRAMES_PER_SECOND -= 30;
+    }else{
+       FRAMES_PER_SECOND -= 10;
+    }
+    if(FRAMES_PER_SECOND <= 5){
+      FRAMES_PER_SECOND = 5;
+    }
+    handleWifi();
+  });
+  server.on("/brightUp", [](){
+    BRIGHTNESS += 30;
+    if(BRIGHTNESS >= 220){
+      BRIGHTNESS = 220;
+    }
+    FastLED.setBrightness(BRIGHTNESS);
+    FastLED.show();
+    handleWifi();
+  });
+  server.on("/brightDown", [](){
+    BRIGHTNESS -= 30;
+    if(BRIGHTNESS <= 15){
+      BRIGHTNESS = 0;
+    }  
+    FastLED.setBrightness(BRIGHTNESS);
+    FastLED.show();
+    handleWifi();
+  });
+  server.on("/solid", [](){
+    setAllFalse();
+    r = server.arg("r").toInt();
+    g = server.arg("g").toInt();
+    b = server.arg("b").toInt();
+    solid_loop();
+    handleWifi();
+  });
+  server.on("/increase", [](){
+    int color = server.arg("c").toInt();
+    int ammount = server.arg("a").toInt();
+    if(color == 1){
+      r += ammount;
+    }
+    if(color == 2){
+      g+=ammount;
+    }
+    if(color == 3){
+      b+=ammount;
+    }
+    if(r > 250){
+      r =250;
+    }
+    if(g > 250){
+      g=250;
+    }
+    if(b>250){
+      b=250;
+    }
+    solid_loop();
+    handleWifi();
+  });
+  server.on("/decrease", [](){
+    int color = server.arg("c").toInt();
+    int ammount = server.arg("a").toInt();
+    if(color == 1){
+      r -= ammount;
+    }
+    if(color == 2){
+      g -= ammount;
+    }
+    if(color == 3){
+      b -= ammount;
+    }
+    if(r < 10){
+      r = 0;
+    }
+    if(g < 10){
+      g=0;
+    }
+    if(b < 10){
+      b=0;
+    }
+    solid_loop();
+    handleWifi();
+  });
+
+  server.onNotFound ( handleNotFound );
+  server.begin(); // Web server start
+  Serial.println("HTTP server started");
+  rainbowTrue_call();
+}
+
+void connectWifi() {
+  Serial.println("Connecting as wifi client...");
+  WiFi.disconnect();
+  WiFi.begin(ssid, password);
+  int connRes = WiFi.waitForConnectResult();
+  Serial.print("connRes: ");
+  Serial.println(connRes);
+}
+
+typedef void (*SimplePatternList[])();
+SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, confetti, sinelon, bpm, juggle };
+
+uint8_t gCurrentPatternNumber = 0; // Index number of which pattern is current
+uint8_t gHue = 0; // rotating "base color" used by many of the patterns
+uint8_t gHue2 = 0; // rotating "base color" used by many of the patterns
+
+
+void loop() {
+  dnsServer.processNextRequest();
+  server.handleClient();
+  int setDelay;
+  if (homemade_method == "else"){
+      if(rainbowOn){
+        rainbow();
+      }
+      if(rainbowWithGlitterOn){
+        rainbowWithGlitter();
+      }
+      if(confettiOn){
+        confetti();
+      }
+      if(sinelonOn){
+        sinelon();
+      }
+      if(juggleOn){
+        juggle();
+      }
+      if(slowFadeOn){
+        slowFade();
+      }
+      if(solidOn){
+        solid_loop();
+      }
+      if(bpmOn){
+        bpm();
+      }
+      if(rainbowTrueOn){
+        rainbowTrue();
+      }
+      for(int i=0 ; i<NUM_LEDS/2; i++)
+      {
+          leds[NUM_LEDS-i-1]=leds[i];
+      }
+      FastLED.show(); 
+      setDelay =  FRAMES_PER_SECOND;
+      EVERY_N_MILLISECONDS( 20 ) { gHue++; } // slowly cycle the "base color" through the rainbow
+  }
+  if (homemade_method == "rings"){
+    if(concentricRingsOn){
+    }
+    if(unsunkRingsOn){
+    }
+    if(sunkRingsOn){
+    }
+    if(poolingRingsOn){
+    }
+    setDelay = FRAMES_PER_SECOND;
+  }
+  if(twinkleSetOn){
+    twinkleSet();
+  }
+  unsigned long CurrentTime = millis();
+  unsigned long ElapsedTime = CurrentTime - StartTime;
+  if(ElapsedTime > wifi_uptime){
+    if(wifi_on){
+      WiFi.mode( WIFI_OFF );
+      WiFi.forceSleepBegin();
+      wifi_on = false;
+    }
+    StartTime = millis();
+  }
+  delay(FRAMES_PER_SECOND);
+}
+
+#define ARRAY_SIZE(A) (sizeof(A) / sizeof((A)[0]))
+void nextPattern()
+{
+  gCurrentPatternNumber = (gCurrentPatternNumber + 1) % ARRAY_SIZE( gPatterns);
+}
+
+void solid_loop(){
+    solidOn = true;
+    for(int k = 0; k < NUM_LEDS; k++) {
+      leds[k].setRGB(r, b, g);
+    }
+     FastLED.show();
+}
+
+void setAllFalse(){
+  rainbowOn = false;
+  rainbowWithGlitterOn = false;
+  confettiOn = false;
+  sinelonOn = false;
+  juggleOn = false;
+  bpmOn = false;
+  homemade_method = "else";
+  concentricRingsOn = false;
+  unsunkRingsOn = false;
+  sunkRingsOn = false;
+  poolingRingsOn = false;
+  slowFadeOn = false;
+  twinkleSetOn = false;
+  solidOn = false;
+  rainbowTrueOn = false;
+}
+
+void rainbowTrue_call()   // FastLED's built-in rainbow generator
+{
+  setAllFalse();
+  rainbowTrueOn = true;
+  handleWifi();
+}
+
+void concentricRings_call()   // FastLED's built-in rainbow generator
+{
+  setAllFalse();
+  concentricRingsOn = true;
+  homemade_method = "rings";
+  handleWifi();
+}
+
+void unsunkRings_call() // built-in FastLED rainbow, plus some random sparkly glitter
+{
+  setAllFalse();
+  unsunkRingsOn = true;
+  homemade_method = "rings";
+  handleWifi();
+}
+
+void sunkRings_call() 
+{
+  setAllFalse();
+  sunkRingsOn = true;
+  homemade_method = "rings";
+  handleWifi();
+}
+
+void poolingRings_call()  // a colored dot sweeping back and forth, with fading trails
+
+{
+  setAllFalse();
+  poolingRingsOn = true;
+  homemade_method = "rings";
+  FRAMES_PER_SECOND = 70;
+  handleWifi();
+}
+
+void rainbow_call()   // FastLED's built-in rainbow generator
+{
+  setAllFalse();
+  rainbowOn = true;
+  handleWifi();
+}
+
+void rainbowWithGlitter_call() // built-in FastLED rainbow, plus some random sparkly glitter
+{
+  setAllFalse();
+  rainbowWithGlitterOn = true;
+  handleWifi();
+}
+
+void confetti_call() 
+{
+  setAllFalse();
+  confettiOn = true;
+  handleWifi();
+}
+
+void sinelon_call()  // a colored dot sweeping back and forth, with fading trails
+
+{
+  setAllFalse();
+  sinelonOn = true;
+  handleWifi();
+}
+
+void bpm_call()   // built-in FastLED rainbow, plus some random sparkly glitter
+{
+  setAllFalse();
+  bpmOn = true;
+  handleWifi();
+}
+
+void slowFade_call()  // a colored dot sweeping back and forth, with fading trails
+{
+  setAllFalse();
+  slowFadeOn = true;
+  handleWifi();
+}
+
+void twinkleSet_call()  // a colored dot sweeping back and forth, with fading trails
+{
+  twinkleSetOn = true;
+  handleWifi();
+}
+
+void juggle_call()  // a colored dot sweeping back and forth, with fading trails
+{
+  setAllFalse();
+  juggleOn = true;
+  handleWifi();
+}
+
+
+void next_call() 
+{
+  setAllFalse();
+  nextPattern();
+  handleWifi();
+}
+
+void rainbowTrue() 
+{
+  fill_rainbow( leds, NUM_LEDS/2, gHue, 36);
+}
+
+void rainbow() 
+{
+  // FastLED's built-in rainbow generator
+  fill_rainbow( leds, NUM_LEDS/2, gHue, 7);
+}
+
+void rainbowWithGlitter() 
+{
+  rainbow();
+  addGlitter(80);
+}
+
+void addGlitter( fract8 chanceOfGlitter) 
+{
+  if( random8() < chanceOfGlitter) {
+    leds[ random16(NUM_LEDS/2) ] += CRGB::White;
+  }
+}
+
+void confetti() 
+{
+  fadeToBlackBy( leds, NUM_LEDS, 100);
+  int pos = random16(NUM_LEDS/2);
+  leds[pos] += CHSV( gHue + random8(64), 255, 192);
+}
+
+void sinelon()
+{
+  fadeToBlackBy( leds, NUM_LEDS, 100);
+  int pos = beatsin16( 50, 0, NUM_LEDS/2-1 );
+  leds[pos] += CHSV( gHue, 255, 192);
+}
+
+void bpm()
+{
+  CRGBPalette16 palette = PartyColors_p;
+  uint8_t beat = beatsin8( BeatsPerMinute, 64, 255);
+  for( int i = 0; i < NUM_LEDS/2; i++) { //9948
+    leds[i] = ColorFromPalette(palette, gHue+(i*2), beat-gHue+(i*10));
+  }
+}
+
+void slowFade() {
+  fadeHue++;
+  for( int i = 0; i < NUM_LEDS/2; i++) {
+    leds[i].setHue(fadeHue);
+  }
+  Serial.println(fadeHue);
+  if(fadeHue > 255){
+    fadeHue = 0;
+  }
+}
+
+void twinkleSet() {
+  int pos = random16(NUM_LEDS/2);
+  leds[pos] += CHSV( gHue + random8(64), 200, 255);
+  FastLED.show(); 
+}
+
+void juggle() {
+  fadeToBlackBy( leds, NUM_LEDS, 20);
+  byte dothue = 0;
+  for( int i = 0; i < 8; i++) {
+    leds[beatsin16( i+7, 0, NUM_LEDS-1 )] |= CHSV(dothue, 200, 255);
+    dothue += 32;
+  }
+}
